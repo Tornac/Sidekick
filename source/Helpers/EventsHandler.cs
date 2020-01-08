@@ -5,6 +5,7 @@ using Sidekick.Helpers.POETradeAPI;
 using Sidekick.Windows.Overlay;
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -40,18 +41,27 @@ namespace Sidekick.Helpers
                 e.Handled = true;
                 Task.Run(TriggerItemFetch);
             }
+            else if (!OverlayController.IsDisplayed && e.Modifiers == (Keys.Control | Keys.Shift) && e.KeyCode == Keys.D)
+            {
+                if (!ProcessHelper.IsPathOfExileInFocus())
+                    return;
+
+                e.Handled = true;
+                Task.Run(TriggerBulkQuery);
+            }
+        }
+
+        private static Item ParseItemUnderCursor()
+        {
+            SendKeys.SendWait("^{c}");
+            Thread.Sleep(10); // without this, it seems to sometimes get outdated clipboard data
+            return ItemParser.ParseItem(ClipboardHelper.GetText());
         }
 
         private static async void TriggerItemFetch()
         {
             Logger.Log("Hotkey pressed.");
-
-            // Trigger copy action.
-            SendKeys.SendWait("^{c}");
-            // Retrieve clipboard.
-            var itemText = ClipboardHelper.GetText();
-            // Parse item.            
-            var item = ItemParser.ParseItem(itemText);
+            var item = ParseItemUnderCursor();
             if (item != null)
             {
                 OverlayController.SetPosition(Cursor.Position.X, Cursor.Position.Y);
@@ -66,6 +76,17 @@ namespace Sidekick.Helpers
             }
 
             OverlayController.Hide();
+        }
+
+        private static async void TriggerBulkQuery()
+        {
+            var item = ParseItemUnderCursor();
+            if (item == null) return;
+            var result = await TradeClient.BulkQuery(item);
+            var text = string.Join("\n", from l in result
+                                         select $"{l.Ratio.BuyerReceives}c for {l.Ratio.SellerGives}, {l.Ratio.UnitPrice} each, stock: {l.Stock} seller: {l.SellerAccountName}");
+            // TODO: replace with a proper WPF window
+            MessageBox.Show($"Bulk Listings for {item.Name}\n\n{text}");
         }
 
         public static void Dispose()
